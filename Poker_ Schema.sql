@@ -33,7 +33,9 @@ create table if not exists games (
   venue_id bigint not null references venues(venue_id),
   game_title text,                               -- EN: optional display title
   start_time timestamptz not null,               -- EN: when the tournament starts
+  buy_in numeric(12,2) not null default 0,       -- EN: entry cost (USD)
   status text not null default 'completed',      -- EN: completed | active | scheduled
+  buy_in numeric(12,2) not null default 0,       -- EN: entry fee per player (e.g. 50.00); 0 means free/TBD
   created_at timestamptz not null default now()
 );
 

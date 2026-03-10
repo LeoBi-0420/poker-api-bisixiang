@@ -1,9 +1,10 @@
 # main.py
 import os
+from decimal import Decimal
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from typing import List
 from db import get_conn
@@ -39,6 +40,14 @@ class GameCreate(BaseModel):
     game_title: str
     start_time: datetime
     venue_id: int
+    buy_in: Decimal = Decimal("0")
+
+    @field_validator("buy_in")
+    @classmethod
+    def buy_in_non_negative(cls, v: Decimal) -> Decimal:
+        if v < 0:
+            raise ValueError("buy_in must be non-negative")
+        return v
 
 class ResultCreate(BaseModel):
     finish_rank: int
@@ -89,6 +98,7 @@ def list_games(
             g.game_title,
             g.start_time,
             g.status,
+            g.buy_in,
             v.venue_name
         FROM games g
         JOIN venues v ON v.venue_id = g.venue_id
@@ -115,13 +125,14 @@ def list_games(
             rows = cur.fetchall()
 
     out = []
-    for (game_id, game_title, start_time, status, venue_name) in rows:
+    for (game_id, game_title, start_time, status, buy_in, venue_name) in rows:
         out.append(
             {
                 "game_id": game_id,
                 "game_title": game_title,
                 "start_time": start_time.isoformat() if start_time else None,
                 "status": status,
+                "buy_in": float(buy_in) if buy_in is not None else None,
                 "venue_name": venue_name,
             }
         )
@@ -144,6 +155,7 @@ def get_game(game_id: int):
             g.game_title,
             g.start_time,
             g.status,
+            g.buy_in,
             v.venue_id,
             v.venue_name
         from games g
@@ -174,7 +186,7 @@ def get_game(game_id: int):
             if not row:
                 raise HTTPException(status_code=404, detail=f"Game {game_id} not found")
 
-            (gid, title, start_time, status, venue_id, venue_name) = row
+            (gid, title, start_time, status, buy_in, venue_id, venue_name) = row
 
             # results rows
             cur.execute(results_sql, {"game_id": game_id})
@@ -197,6 +209,7 @@ def get_game(game_id: int):
         "game_title": title,
         "start_time": start_time.isoformat() if start_time else None,
         "status": status,
+        "buy_in": float(buy_in) if buy_in is not None else None,
         "venue": {
             "venue_id": venue_id,
             "venue_name": venue_name,
@@ -257,9 +270,9 @@ def create_game(game: GameCreate):
     # 1) check venue exists
     sql_check_venue = "select venue_id, venue_name from venues where venue_id = %(venue_id)s;"
     sql_insert_game = """
-        insert into games (game_title, start_time, status, venue_id)
-        values (%(game_title)s, %(start_time)s, %(status)s, %(venue_id)s)
-        returning game_id, game_title, start_time, status, venue_id;
+        insert into games (game_title, start_time, status, venue_id, buy_in)
+        values (%(game_title)s, %(start_time)s, %(status)s, %(venue_id)s, %(buy_in)s)
+        returning game_id, game_title, start_time, status, buy_in, venue_id;
     """
 
     with get_conn() as conn:
@@ -280,17 +293,19 @@ def create_game(game: GameCreate):
                     "start_time": game.start_time,
                     "status": "scheduled",
                     "venue_id": venue_id,
+                    "buy_in": game.buy_in,
                 },
             )
             row = cur.fetchone()
 
-    game_id, game_title, start_time, status, venue_id = row
+    game_id, game_title, start_time, status, buy_in, venue_id = row
 
     return {
         "game_id": game_id,
         "game_title": game_title,
         "start_time": start_time.isoformat() if start_time else None,
         "status": status,
+        "buy_in": float(buy_in) if buy_in is not None else None,
         "venue": {
             "venue_id": venue_id,
             "venue_name": venue_name,

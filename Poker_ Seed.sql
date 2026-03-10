@@ -18,11 +18,12 @@ values
 on conflict do nothing;
 
 -- Games
-insert into games (venue_id, game_title, start_time)
+insert into games (venue_id, game_title, start_time, buy_in)
 select
   v.venue_id,
   'Urban Pie Sundays',
-  '2026-01-11 19:00:00-05'
+  '2026-01-11 19:00:00-05',
+  150.00
 from venues v
 where v.venue_name = 'Urban Pie'
 on conflict (venue_id, start_time) do nothing;
