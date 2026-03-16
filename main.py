@@ -1,6 +1,7 @@
 # main.py
 import os
 from decimal import Decimal
+from functools import lru_cache
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -82,6 +83,25 @@ def docs_redirect():
     return RedirectResponse(url="/api-docs")
 
 
+@lru_cache(maxsize=None)
+def has_column(table_name: str, column_name: str) -> bool:
+    sql = """
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = %(table_name)s
+          and column_name = %(column_name)s
+        limit 1;
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                {"table_name": table_name, "column_name": column_name},
+            )
+            return cur.fetchone() is not None
+
+
 @app.get("/games")
 def list_games(
     limit: int = Query(20, ge=1, le=200),
@@ -92,13 +112,19 @@ def list_games(
     CN: 返回最近的比赛列表。可选筛选：venue（大小写不敏感，支持模糊匹配）
     """
 
-    base_sql = """
+    select_buy_in = (
+        "g.buy_in"
+        if has_column("games", "buy_in")
+        else "0::numeric as buy_in"
+    )
+
+    base_sql = f"""
         SELECT
             g.game_id,
             g.game_title,
             g.start_time,
             g.status,
-            g.buy_in,
+            {select_buy_in},
             v.venue_name
         FROM games g
         JOIN venues v ON v.venue_id = g.venue_id
@@ -149,13 +175,19 @@ def get_game(game_id: int):
     """
 
     # 1) Query game + venue
-    game_sql = """
+    select_buy_in = (
+        "g.buy_in"
+        if has_column("games", "buy_in")
+        else "0::numeric as buy_in"
+    )
+
+    game_sql = f"""
         select
             g.game_id,
             g.game_title,
             g.start_time,
             g.status,
-            g.buy_in,
+            {select_buy_in},
             v.venue_id,
             v.venue_name
         from games g
@@ -373,8 +405,19 @@ def list_players(
     EN: List players. Optional search by display_name (case-insensitive, partial).
     CN: 玩家列表。可选按 display_name 模糊搜索（大小写不敏感）。
     """
-    sql = """
-        select player_id, display_name, avatar_url, created_at
+    select_avatar_url = (
+        "avatar_url"
+        if has_column("players", "avatar_url")
+        else "null::text as avatar_url"
+    )
+    select_created_at = (
+        "created_at"
+        if has_column("players", "created_at")
+        else "null::timestamptz as created_at"
+    )
+
+    sql = f"""
+        select player_id, display_name, {select_avatar_url}, {select_created_at}
         from players
     """
     params = {"limit": limit}
