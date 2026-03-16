@@ -1,5 +1,6 @@
 # main.py
 import os
+import math
 from decimal import Decimal
 from functools import lru_cache
 from fastapi import FastAPI, Query, HTTPException
@@ -102,6 +103,26 @@ def has_column(table_name: str, column_name: str) -> bool:
             return cur.fetchone() is not None
 
 
+def serialize_buy_in(value):
+    if value is None:
+        return None
+
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            return 0.0
+        return float(value)
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+    if not math.isfinite(numeric):
+        return 0.0
+
+    return numeric
+
+
 @app.get("/games")
 def list_games(
     limit: int = Query(20, ge=1, le=200),
@@ -158,7 +179,7 @@ def list_games(
                 "game_title": game_title,
                 "start_time": start_time.isoformat() if start_time else None,
                 "status": status,
-                "buy_in": float(buy_in) if buy_in is not None else None,
+                "buy_in": serialize_buy_in(buy_in),
                 "venue_name": venue_name,
             }
         )
@@ -241,7 +262,7 @@ def get_game(game_id: int):
         "game_title": title,
         "start_time": start_time.isoformat() if start_time else None,
         "status": status,
-        "buy_in": float(buy_in) if buy_in is not None else None,
+        "buy_in": serialize_buy_in(buy_in),
         "venue": {
             "venue_id": venue_id,
             "venue_name": venue_name,
@@ -337,7 +358,7 @@ def create_game(game: GameCreate):
         "game_title": game_title,
         "start_time": start_time.isoformat() if start_time else None,
         "status": status,
-        "buy_in": float(buy_in) if buy_in is not None else None,
+        "buy_in": serialize_buy_in(buy_in),
         "venue": {
             "venue_id": venue_id,
             "venue_name": venue_name,
