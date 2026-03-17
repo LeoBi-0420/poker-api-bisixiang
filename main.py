@@ -323,8 +323,8 @@ def create_game(game: GameCreate):
     # 1) check venue exists
     sql_check_venue = "select venue_id, venue_name from venues where venue_id = %(venue_id)s;"
     sql_insert_game = """
-        insert into games (game_title, start_time, status, venue_id, buy_in)
-        values (%(game_title)s, %(start_time)s, %(status)s, %(venue_id)s, %(buy_in)s)
+        insert into games (game_title, start_time, venue_id, buy_in)
+        values (%(game_title)s, %(start_time)s, %(venue_id)s, %(buy_in)s)
         returning game_id, game_title, start_time, status, buy_in, venue_id;
     """
 
@@ -344,7 +344,6 @@ def create_game(game: GameCreate):
                 {
                     "game_title": game.game_title,
                     "start_time": game.start_time,
-                    "status": "scheduled",
                     "venue_id": venue_id,
                     "buy_in": game.buy_in,
                 },
