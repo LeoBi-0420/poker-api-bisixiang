@@ -328,27 +328,32 @@ def create_game(game: GameCreate):
         returning game_id, game_title, start_time, status, buy_in, venue_id;
     """
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # check venue
-            cur.execute(sql_check_venue, {"venue_id": game.venue_id})
-            v = cur.fetchone()
-            if not v:
-                raise HTTPException(status_code=400, detail=f"venue_id {game.venue_id} does not exist")
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # check venue
+                cur.execute(sql_check_venue, {"venue_id": game.venue_id})
+                v = cur.fetchone()
+                if not v:
+                    raise HTTPException(status_code=400, detail=f"venue_id {game.venue_id} does not exist")
 
-            venue_id, venue_name = v
+                venue_id, venue_name = v
 
-            # insert game
-            cur.execute(
-                sql_insert_game,
-                {
-                    "game_title": game.game_title,
-                    "start_time": game.start_time,
-                    "venue_id": venue_id,
-                    "buy_in": game.buy_in,
-                },
-            )
-            row = cur.fetchone()
+                # insert game
+                cur.execute(
+                    sql_insert_game,
+                    {
+                        "game_title": game.game_title,
+                        "start_time": game.start_time,
+                        "venue_id": venue_id,
+                        "buy_in": game.buy_in,
+                    },
+                )
+                row = cur.fetchone()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Create game failed: {exc}")
 
     game_id, game_title, start_time, status, buy_in, venue_id = row
 
