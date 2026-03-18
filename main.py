@@ -220,6 +220,7 @@ def get_game(game_id: int):
     results_sql = """
         select
             r.finish_rank,
+            r.player_id,
             p.display_name as player,
             r.points,
             r.kos,
@@ -246,10 +247,11 @@ def get_game(game_id: int):
             results_rows = cur.fetchall()
 
     results = []
-    for (finish_rank, player, points, kos, eliminated_by) in results_rows:
+    for (finish_rank, player_id, player, points, kos, eliminated_by) in results_rows:
         results.append(
             {
                 "finish_rank": finish_rank,
+                "player_id": player_id,
                 "player": player,
                 "points": points,
                 "kos": kos,
@@ -282,6 +284,7 @@ def game_results(game_id: int):
     sql = """
         select
             r.finish_rank,
+            r.player_id,
             p.display_name as player,
             r.points,
             r.kos,
@@ -300,10 +303,11 @@ def game_results(game_id: int):
 
     # ✅ no results => return empty list (not 500)
     out = []
-    for finish_rank, player, points, kos, eliminated_by in rows:
+    for finish_rank, player_id, player, points, kos, eliminated_by in rows:
         out.append(
             {
                 "finish_rank": finish_rank,
+                "player_id": player_id,
                 "player": player,
                 "points": points,
                 "kos": kos,
@@ -605,4 +609,161 @@ def create_venue(venue: VenueCreate):
         "city": city,
         "state": state,
         "created_at": created_at.isoformat() if created_at else None,
+    }
+
+
+@app.delete("/games/{game_id}/results/{player_id}")
+def delete_result(game_id: int, player_id: int):
+    """
+    EN: Delete a single player's result for a game.
+    CN: 删除某场比赛中某位玩家的一条结果。
+    """
+    sql = """
+        delete from results
+        where game_id = %(game_id)s and player_id = %(player_id)s
+        returning result_id;
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"game_id": game_id, "player_id": player_id})
+            row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Result not found")
+
+    return {
+        "deleted": True,
+        "game_id": game_id,
+        "player_id": player_id,
+    }
+
+
+@app.delete("/games/{game_id}")
+def delete_game(game_id: int):
+    """
+    EN: Delete a game and cascade-delete its results.
+    CN: 删除一场比赛，并级联删除相关结果。
+    """
+    sql_count = "select count(*) from results where game_id = %(game_id)s;"
+    sql_delete = """
+        delete from games
+        where game_id = %(game_id)s
+        returning game_id, game_title;
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_count, {"game_id": game_id})
+            deleted_results = cur.fetchone()[0]
+
+            cur.execute(sql_delete, {"game_id": game_id})
+            row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Game {game_id} not found")
+
+    deleted_game_id, game_title = row
+    return {
+        "deleted": True,
+        "game_id": deleted_game_id,
+        "game_title": game_title,
+        "deleted_results": deleted_results,
+    }
+
+
+@app.delete("/players/{player_id}")
+def delete_player(player_id: int):
+    """
+    EN: Delete a player when no game results depend on them.
+    CN: 当没有比赛结果依赖该玩家时删除玩家。
+    """
+    sql_player = """
+        select player_id, display_name
+        from players
+        where player_id = %(player_id)s;
+    """
+    sql_usage = """
+        select count(*)
+        from results
+        where player_id = %(player_id)s
+           or eliminated_by_player_id = %(player_id)s;
+    """
+    sql_delete = """
+        delete from players
+        where player_id = %(player_id)s
+        returning player_id, display_name;
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_player, {"player_id": player_id})
+            player = cur.fetchone()
+            if not player:
+                raise HTTPException(status_code=404, detail=f"Player {player_id} not found")
+
+            cur.execute(sql_usage, {"player_id": player_id})
+            linked_results = cur.fetchone()[0]
+            if linked_results > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete player with recorded game results. Delete those results first.",
+                )
+
+            cur.execute(sql_delete, {"player_id": player_id})
+            row = cur.fetchone()
+
+    deleted_player_id, display_name = row
+    return {
+        "deleted": True,
+        "player_id": deleted_player_id,
+        "display_name": display_name,
+    }
+
+
+@app.delete("/venues/{venue_id}")
+def delete_venue(venue_id: int):
+    """
+    EN: Delete a venue when no games are linked to it.
+    CN: 当没有比赛关联该场地时删除场地。
+    """
+    sql_venue = """
+        select venue_id, venue_name
+        from venues
+        where venue_id = %(venue_id)s;
+    """
+    sql_usage = """
+        select count(*)
+        from games
+        where venue_id = %(venue_id)s;
+    """
+    sql_delete = """
+        delete from venues
+        where venue_id = %(venue_id)s
+        returning venue_id, venue_name;
+    """
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_venue, {"venue_id": venue_id})
+            venue = cur.fetchone()
+            if not venue:
+                raise HTTPException(status_code=404, detail=f"Venue {venue_id} not found")
+
+            cur.execute(sql_usage, {"venue_id": venue_id})
+            linked_games = cur.fetchone()[0]
+            if linked_games > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot delete venue with existing games. Delete those games first.",
+                )
+
+            cur.execute(sql_delete, {"venue_id": venue_id})
+            row = cur.fetchone()
+
+    deleted_venue_id, venue_name = row
+    return {
+        "deleted": True,
+        "venue_id": deleted_venue_id,
+        "venue_name": venue_name,
     }
